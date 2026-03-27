@@ -261,6 +261,15 @@ export default SlackFunction(
       const newDmMinutes =
         vals.dm_block.dm_reminder_minutes.selected_option.value;
 
+      // Validate future date
+      const todayISO = new Date().toISOString().slice(0, 10);
+      if (newDate < todayISO) {
+        return {
+          response_action: "errors",
+          errors: { date_block: t(locale, "validation.past_time") },
+        };
+      }
+
       // Create new triggers FIRST, then delete old ones (safer ordering)
       const scheduledISO = `${newDate}T${newTime}:00`;
       const endTime = newRecurrence !== "once"

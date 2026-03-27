@@ -44,16 +44,23 @@ export default SlackFunction(
       };
     }
 
-    const now = new Date();
+    const todayISO = new Date().toISOString().slice(0, 10);
     const bookings = queryResponse.items
       .filter((b: Record<string, string>) => {
         if (b.channel_id !== inputs.channel_id) return false;
         const recurrence = b.recurrence_type ?? "once";
-        if (recurrence !== "once") return true;
-        const scheduledDate = new Date(
-          `${b.scheduled_date}T${b.scheduled_time}:00`,
-        );
-        return scheduledDate.getTime() > now.getTime();
+        if (recurrence !== "once") {
+          // Recurring: still active if no end date has passed
+          // End date is ~1 year from start; compare as string
+          const endDate = b.scheduled_date
+            ? `${parseInt(b.scheduled_date.slice(0, 4)) + 1}${
+              b.scheduled_date.slice(4)
+            }`
+            : "9999-12-31";
+          return endDate >= todayISO;
+        }
+        // One-time: must be in the future
+        return b.scheduled_date >= todayISO;
       })
       .sort((a: Record<string, string>, b: Record<string, string>) => {
         const dateA = `${a.scheduled_date}T${a.scheduled_time}`;
@@ -100,10 +107,11 @@ export default SlackFunction(
         type: "section",
         text: {
           type: "mrkdwn",
-          text:
-            `*${booking.title}*\n:calendar: ${booking.scheduled_date} kl ${booking.scheduled_time}${recSuffix}\n:busts_in_silhouette: ${participantMentions}\n:bust_in_silhouette: ${
-              t(locale, "notification.footer", { creator: booking.creator_id })
-            }${dmSuffix}\nID: \`${booking.id}\``,
+          text: `*${booking.title}*\n:calendar: ${booking.scheduled_date} ${
+            locale === "sv" ? "kl" : "at"
+          } ${booking.scheduled_time}${recSuffix}\n:busts_in_silhouette: ${participantMentions}\n:bust_in_silhouette: ${
+            t(locale, "notification.footer", { creator: booking.creator_id })
+          }${dmSuffix}\nID: \`${booking.id}\``,
         },
       });
       blocks.push({ type: "divider" });

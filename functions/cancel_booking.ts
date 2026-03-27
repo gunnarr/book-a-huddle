@@ -47,18 +47,32 @@ export default SlackFunction(
     const booking = getResponse.item;
 
     if (booking.status === "cancelled") {
-      await client.chat.postMessage({
+      const msgResp = await client.chat.postMessage({
         channel: inputs.user_id,
         text: t(locale, "cancel.already_cancelled", { title: booking.title }),
       });
+      if (!msgResp.ok) {
+        return {
+          error: t(locale, "error.send_message", {
+            error: String(msgResp.error),
+          }),
+        };
+      }
       return { outputs: {} };
     }
 
     if (booking.creator_id !== inputs.user_id) {
-      await client.chat.postMessage({
+      const msgResp = await client.chat.postMessage({
         channel: inputs.user_id,
         text: t(locale, "cancel.not_creator"),
       });
+      if (!msgResp.ok) {
+        return {
+          error: t(locale, "error.send_message", {
+            error: String(msgResp.error),
+          }),
+        };
+      }
       return { outputs: {} };
     }
 

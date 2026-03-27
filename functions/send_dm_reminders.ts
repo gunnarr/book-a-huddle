@@ -42,8 +42,9 @@ export default SlackFunction(
     const locale: Locale = booking.creator_locale ?? "en";
     const participants: string[] = JSON.parse(booking.participants_json);
 
+    const failures: string[] = [];
     for (const userId of participants) {
-      await client.chat.postMessage({
+      const resp = await client.chat.postMessage({
         channel: userId,
         text: t(locale, "dm_reminder.message", {
           title: booking.title,
@@ -51,6 +52,13 @@ export default SlackFunction(
           channel: booking.channel_id,
         }),
       });
+      if (!resp.ok) {
+        failures.push(userId);
+      }
+    }
+
+    if (failures.length === participants.length) {
+      return { error: `Could not send DM to any participant` };
     }
 
     return { outputs: {} };

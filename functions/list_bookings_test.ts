@@ -255,7 +255,7 @@ Deno.test("recurring booking with past start date -- still shows", async () => {
       items: [
         makeBooking({
           title: "Daglig standup",
-          scheduled_date: "2020-01-01",
+          scheduled_date: "2026-01-01",
           scheduled_time: "09:00",
           recurrence_type: "daily",
         }),
