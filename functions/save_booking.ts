@@ -44,9 +44,25 @@ export const SaveBookingFunctionDefinition = DefineFunction({
   },
 });
 
+// All times are naive Europe/Stockholm — no Date objects to avoid UTC conversion.
+// The trigger's timezone: "Europe/Stockholm" handles the rest.
+
+const WEEKDAYS = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+];
+
 export function deriveWeekday(dateStr: string): string {
-  const d = new Date(dateStr + "T12:00:00");
-  return d.toLocaleDateString("en-US", { weekday: "long" });
+  // Parse YYYY-MM-DD manually and use UTC-safe day-of-week calculation
+  const [y, m, d] = dateStr.split("-").map(Number);
+  // Zeller-safe: use Date.UTC to avoid local timezone shifts
+  const dayIndex = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+  return WEEKDAYS[dayIndex];
 }
 
 export function subtractMinutes(
@@ -54,10 +70,29 @@ export function subtractMinutes(
   timeStr: string,
   minutes: number,
 ): string {
-  const d = new Date(`${dateStr}T${timeStr}:00`);
-  d.setMinutes(d.getMinutes() - minutes);
-  const iso = d.toISOString();
-  return iso.slice(0, 19);
+  // Pure string arithmetic — no Date timezone conversion
+  const [year, month, day] = dateStr.split("-").map(Number);
+  const [hours, mins] = timeStr.split(":").map(Number);
+
+  let totalMinutes = hours * 60 + mins - minutes;
+  let dayOffset = 0;
+
+  while (totalMinutes < 0) {
+    totalMinutes += 24 * 60;
+    dayOffset -= 1;
+  }
+
+  const newHours = Math.floor(totalMinutes / 60);
+  const newMins = totalMinutes % 60;
+
+  // Adjust date if we crossed midnight
+  const d = new Date(Date.UTC(year, month - 1, day + dayOffset));
+  const newDate = d.toISOString().slice(0, 10);
+  const newTime = `${String(newHours).padStart(2, "0")}:${
+    String(newMins).padStart(2, "0")
+  }`;
+
+  return `${newDate}T${newTime}:00`;
 }
 
 function buildFrequency(
@@ -79,9 +114,18 @@ function buildFrequency(
 
 function buildEndTime(recurrenceType: string, dateStr: string): string | null {
   if (recurrenceType === "once") return null;
-  const d = new Date(dateStr + "T23:59:59");
-  d.setFullYear(d.getFullYear() + 1);
-  return d.toISOString().slice(0, 19);
+  // Add 1 year using pure string math
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const endYear = y + 1;
+  // Handle Feb 29 → Feb 28 for non-leap years
+  const endDay = m === 2 && d === 29 && !isLeapYear(endYear) ? 28 : d;
+  return `${endYear}-${String(m).padStart(2, "0")}-${
+    String(endDay).padStart(2, "0")
+  }T23:59:59`;
+}
+
+function isLeapYear(year: number): boolean {
+  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
 }
 
 export default SlackFunction(
@@ -100,12 +144,12 @@ export default SlackFunction(
 
     const locale: Locale = await detectLocale(client, creator_id);
 
-    // Step 1: Validate future time
+    // Step 1: Validate future time (best-effort — the trigger API will also reject past times)
+    // Compare date strings directly to catch obviously past bookings (e.g. yesterday)
     const scheduledISO = `${date}T${time}:00`;
-    const scheduledDate = new Date(scheduledISO);
-    const now = new Date();
+    const todayISO = new Date().toISOString().slice(0, 10);
 
-    if (scheduledDate.getTime() <= now.getTime()) {
+    if (date < todayISO) {
       const postResponse = await client.chat.postMessage({
         channel: channel_id,
         text: t(locale, "validation.past_time"),
@@ -180,6 +224,7 @@ export default SlackFunction(
       if (dmTriggerResponse.ok) {
         dmTriggerId = dmTriggerResponse.trigger.id;
       }
+      // If DM trigger fails, save booking without it (non-critical)
     }
 
     // Step 5: Save booking to datastore

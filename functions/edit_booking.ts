@@ -222,6 +222,7 @@ export default SlackFunction(
           channel_id: booking.channel_id,
           old_trigger_id: booking.trigger_id,
           old_dm_trigger_id: booking.dm_trigger_id ?? "",
+          created_at: booking.created_at,
           locale,
         }),
         title: {
@@ -260,17 +261,7 @@ export default SlackFunction(
       const newDmMinutes =
         vals.dm_block.dm_reminder_minutes.selected_option.value;
 
-      // Delete old triggers (best effort)
-      await client.workflows.triggers.delete({
-        trigger_id: meta.old_trigger_id,
-      });
-      if (meta.old_dm_trigger_id) {
-        await client.workflows.triggers.delete({
-          trigger_id: meta.old_dm_trigger_id,
-        });
-      }
-
-      // Create new main trigger
+      // Create new triggers FIRST, then delete old ones (safer ordering)
       const scheduledISO = `${newDate}T${newTime}:00`;
       const endTime = newRecurrence !== "once"
         ? buildEndTimeForEdit(newDate)
@@ -327,7 +318,17 @@ export default SlackFunction(
         }
       }
 
-      // Update datastore
+      // Now delete old triggers (best effort, after new ones exist)
+      await client.workflows.triggers.delete({
+        trigger_id: meta.old_trigger_id,
+      });
+      if (meta.old_dm_trigger_id) {
+        await client.workflows.triggers.delete({
+          trigger_id: meta.old_dm_trigger_id,
+        });
+      }
+
+      // Update datastore (preserve created_at)
       await client.apps.datastore.put({
         datastore: "HuddleBookings",
         item: {
@@ -340,6 +341,7 @@ export default SlackFunction(
           scheduled_time: newTime,
           trigger_id: newTriggerId,
           status: "active",
+          created_at: meta.created_at,
           recurrence_type: newRecurrence,
           dm_reminder_minutes: newDmMinutes,
           dm_trigger_id: newDmTriggerId,
@@ -387,7 +389,13 @@ function buildFrequencyObj(
 }
 
 function buildEndTimeForEdit(dateStr: string): string {
-  const d = new Date(dateStr + "T23:59:59");
-  d.setFullYear(d.getFullYear() + 1);
-  return d.toISOString().slice(0, 19);
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const endYear = y + 1;
+  const endDay = m === 2 && d === 29 &&
+      !((endYear % 4 === 0 && endYear % 100 !== 0) || endYear % 400 === 0)
+    ? 28
+    : d;
+  return `${endYear}-${String(m).padStart(2, "0")}-${
+    String(endDay).padStart(2, "0")
+  }T23:59:59`;
 }
